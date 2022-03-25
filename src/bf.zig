@@ -1,5 +1,7 @@
 const std = @import("std");
 
+// -------------------- parse --------------------
+
 const Inst = union (enum) {
     Plus: usize,
     Minus: usize,
@@ -11,8 +13,7 @@ const Inst = union (enum) {
     Read,
 };
 
-
-pub fn parse(code: []u8, alloc: std.mem.Allocator) std.ArrayList(Inst) {
+pub fn parse(code: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Inst) {
     var ret = std.ArrayList(Inst).init(alloc);
     var i: usize = 0;
     while (i < code.len) {
@@ -20,41 +21,41 @@ pub fn parse(code: []u8, alloc: std.mem.Allocator) std.ArrayList(Inst) {
             '+' => {
                 const count = get_count(code, i);
                 i += count;
-                ret.append(Inst{.Plus = count});
+                try ret.append(Inst{.Plus = count});
             },
             '-' => {
                 const count = get_count(code, i);
                 i += count;
-                ret.append(Inst{.Minus = count});
+                try ret.append(Inst{.Minus = count});
             },
             '<' => {
                 const count = get_count(code, i);
                 i += count;
-                ret.append(Inst{.Left = count});
+                try ret.append(Inst{.Left = count});
             },
             '>' => {
                 const count = get_count(code, i);
                 i += count;
-                ret.append(Inst{.Right = count});
+                try ret.append(Inst{.Right = count});
             },
             '[' => {
-                re.append(Inst{.LBracket});
+                try ret.append(Inst.LBracket);
                 i += 1;
             },
             ']' => {
-                re.append(Inst{.RBracket});
+                try ret.append(Inst.RBracket);
                 i += 1;
             },
             ',' => {
-                re.append(Inst{.Read});
+                try ret.append(Inst.Read);
                 i += 1;
             },
             '.' => {
                 const count = get_count(code, i);
                 i += count;
-                ret.append(Inst{.Write = count});
+                try ret.append(Inst{.Write = count});
             },
-            _ => {}, // ignore all other characters
+            else => {i += 1;}, // ignore all other characters
         }
     }
     return ret;
@@ -64,22 +65,125 @@ fn get_count(code: []const u8, start: usize) usize {
     const char = code[start];
     var i = start + 1;
     while (i < code.len and code[i] == char) : (i += 1) {}
-    return start - i;
+    return i - start;
 }
+
+// -------------------- exec --------------------
+
+const tape_len = 30_000;
+const File = std.fs.File;
+
+pub fn interpret(code: []const Inst, in: File, out: File) !void {
+    var tape: [tape_len]u8 = .{0} ** tape_len;
+    var ptr: usize = 0;
+    var iptr: usize = 0;
+    const inr = in.reader();
+    while (iptr < code.len) : (iptr += 1) {
+        switch (code[iptr]) {
+            .Plus => |n| {
+                tape[ptr] +%= @intCast(u8, n);
+            },
+            .Minus => |n| {
+                tape[ptr] -%= @intCast(u8, n);
+            },
+            .Left => |n| {
+                ptr -= n;
+            },
+            .Right => |n| {
+                ptr += n;
+            },
+            .Write => |n| {
+                const char = tape[ptr];
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    const i_s: *const [1]u8 = &char;
+                    _ = try out.write(i_s);
+                    // std.debug.print("\n! {c} ({})\n{} {} {} {} {}", .{char, char, tape[0], tape[1], tape[2], tape[3], tape[4]});
+                }
+            },
+            .Read => {
+                tape[ptr] = try inr.readByte();
+            },
+            .LBracket => {
+                if (tape[ptr] == 0) iptr = try find(code, iptr);
+            },
+            .RBracket => {
+                if (tape[ptr] != 0) iptr = try find(code, iptr);
+            }
+        }
+        // std.debug.print("======\ntape {*}\nptr {} iptr {}\ninst {}\n", .{tape[0..20], ptr, iptr, code[iptr]});
+    }
+}
+
+const FindErr = error {
+    IllegalStart, // didn't start on bracket
+    Unmatched,    // didn't find a match
+};
+
+// Find the index of the instruction after the bracket matching
+// the one at code[iptr].
+fn find(code: []const Inst, iptr: usize) FindErr!usize {
+    const start = code[iptr];
+    const opposite = switch (start) {
+        .LBracket => Inst.RBracket,
+        .RBracket => Inst.LBracket,
+        else => return FindErr.IllegalStart,
+    };
+    const direction: i8 = switch (start) {
+        .LBracket => 1,
+        .RBracket => -1,
+        else => unreachable,
+    };
+
+    var depth: usize = 0;
+    var i: i64 = @intCast(i64, iptr) + direction;
+    while (i >= 0 and i < code.len) : (i += direction) {
+        const i_inst = code[@intCast(usize, i)];
+        if (@enumToInt(i_inst) == @enumToInt(opposite)) {
+            if (depth == 0) return @intCast(usize, i);
+            depth -= 1;
+        } else if (@enumToInt(i_inst) == @enumToInt(start)) {
+            depth += 1;
+        }
+    }
+    return FindErr.Unmatched;
+}
+
+// -------------------- tests --------------------
 
 const expect = std.testing.expect;
 
 test "get_count" {
-    expect(3 == get_count("+---[", 1));
-    expect(1 == get_count("+", 0));
+    try expect(3 == get_count("+---[", 1));
+    try expect(1 == get_count("+", 0));
     const s = "+---[],.";
     const new_i = get_count(s, 1) + 1;
-    expect(s[new_i] == '[');
+    try expect(s[new_i] == '[');
 }
 
 test "parse" {
     const code = "++---[],.asdf";
-    const alloc = std.testing.failing_allocator;
-    const result = parse(code, alloc);
+    const alloc = std.heap.page_allocator;
+    var result = try parse(code[0..], alloc);
     defer result.deinit();
+
+    // try expect(result.items[0] == Inst{.Plus = 2});
+    // try expect(result.items[1] == Inst{.Minus = 3});
+    // try expect(result.items[2] == Inst.LBracket);
+    // try expect(result.items[3] == Inst.RBracket);
+    // try expect(result.items[4] == Inst.Read);
+    // try expect(result.items[5] == Inst{.Write = 1});
+    // todo: find an actual way to test this
+    try expect(result.items.len == 6);
+}
+
+test "run" {
+    const code = "+++++[>++++++++++<-].asdf";
+    const alloc = std.heap.page_allocator;
+    var result = try parse(code[0..], alloc);
+    defer result.deinit();
+
+    // std.debug.print("{}\n", .{result});
+
+    try interpret(result.items, std.io.getStdIn(), std.io.getStdOut());
 }

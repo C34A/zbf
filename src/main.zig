@@ -35,9 +35,13 @@ pub fn main() anyerror!void {
     var bytes = try alloc.alloc(u8, try src_file.getEndPos());
     defer alloc.free(bytes);
 
+    // read entire file. return value is length which we don't need. 
     _ = try src_file.readAll(bytes);
 
-    _ = try stdout.write(bytes);
+    // _ = try stdout.write(bytes);
+
+    const instructions = try bf.parse(bytes, alloc);
+    try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
 }
 
 test "basic test" {
