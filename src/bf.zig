@@ -3,19 +3,29 @@ const std = @import("std");
 // -------------------- parse --------------------
 
 const Inst = union (enum) {
-    Plus: usize,
-    Minus: usize,
-    Left: usize,
-    Right: usize,
-    LBracket,
-    RBracket,
-    Write: usize,
+    Plus: usize, // count
+    Minus: usize, // count
+    Left: usize, // count
+    Right: usize, // count
+    LBracket: ?usize, // end index. null until we set it later. SHOULD NOT BE NULL IN DATA RETURNED FROM PARSE!
+    RBracket: usize, // start index
+    Write: usize, // count
     Read,
 };
 
 pub fn parse(code: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Inst) {
     var ret = std.ArrayList(Inst).init(alloc);
+    errdefer ret.deinit(); // if we return an error, make sure to free the arraylist
     var i: usize = 0;
+    // Each time we find a bracket, we push its index onto this stack.
+    // When we find a close bracket, we pop the top index, set that for this
+    // bracket, then go back and find the start bracket using the index and set
+    // its end to the current index.
+    // "index" in the output instruction list is kept track of by the arraylist
+    // len, so we don't need to worry about it.
+    var bracket_stack = std.ArrayList(usize).init(alloc);
+    defer bracket_stack.deinit();
+
     while (i < code.len) {
         switch (code[i]) {
             '+' => {
@@ -39,11 +49,17 @@ pub fn parse(code: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Inst) {
                 try ret.append(Inst{.Right = count});
             },
             '[' => {
-                try ret.append(Inst.LBracket);
+                try bracket_stack.append(ret.items.len);
+                try ret.append(Inst{.LBracket = null});
                 i += 1;
             },
             ']' => {
-                try ret.append(Inst.RBracket);
+                const open_idx = bracket_stack.popOrNull() orelse return FindErr.Unmatched;
+                const close_idx = ret.items.len;
+                try ret.append(Inst{.RBracket = open_idx});
+                // go back and set the open bracket to point to the new close bracket
+                // it is easier to just overwrite it than mutate the existing value
+                ret.items[open_idx] = Inst{.LBracket = close_idx};
                 i += 1;
             },
             ',' => {
@@ -98,17 +114,16 @@ pub fn interpret(code: []const Inst, in: File, out: File) !void {
                 while (i < n) : (i += 1) {
                     const i_s: *const [1]u8 = &char;
                     _ = try out.write(i_s);
-                    // std.debug.print("\n! {c} ({})\n{} {} {} {} {}", .{char, char, tape[0], tape[1], tape[2], tape[3], tape[4]});
                 }
             },
             .Read => {
                 tape[ptr] = try inr.readByte();
             },
-            .LBracket => {
-                if (tape[ptr] == 0) iptr = try find(code, iptr);
+            .LBracket => |end| {
+                if (tape[ptr] == 0) iptr = end.?;
             },
-            .RBracket => {
-                if (tape[ptr] != 0) iptr = try find(code, iptr);
+            .RBracket => |start| {
+                if (tape[ptr] != 0) iptr = start;
             }
         }
         // std.debug.print("======\ntape {*}\nptr {} iptr {}\ninst {}\n", .{tape[0..20], ptr, iptr, code[iptr]});
@@ -122,32 +137,32 @@ const FindErr = error {
 
 // Find the index of the instruction after the bracket matching
 // the one at code[iptr].
-fn find(code: []const Inst, iptr: usize) FindErr!usize {
-    const start = code[iptr];
-    const opposite = switch (start) {
-        .LBracket => Inst.RBracket,
-        .RBracket => Inst.LBracket,
-        else => return FindErr.IllegalStart,
-    };
-    const direction: i8 = switch (start) {
-        .LBracket => 1,
-        .RBracket => -1,
-        else => unreachable,
-    };
+// fn find(code: []const Inst, iptr: usize) FindErr!usize {
+//     const start = code[iptr];
+//     const opposite = switch (start) {
+//         .LBracket => Inst.RBracket,
+//         .RBracket => Inst.LBracket,
+//         else => return FindErr.IllegalStart,
+//     };
+//     const direction: i8 = switch (start) {
+//         .LBracket => 1,
+//         .RBracket => -1,
+//         else => unreachable,
+//     };
 
-    var depth: usize = 0;
-    var i: i64 = @intCast(i64, iptr) + direction;
-    while (i >= 0 and i < code.len) : (i += direction) {
-        const i_inst = code[@intCast(usize, i)];
-        if (@enumToInt(i_inst) == @enumToInt(opposite)) {
-            if (depth == 0) return @intCast(usize, i);
-            depth -= 1;
-        } else if (@enumToInt(i_inst) == @enumToInt(start)) {
-            depth += 1;
-        }
-    }
-    return FindErr.Unmatched;
-}
+//     var depth: usize = 0;
+//     var i: i64 = @intCast(i64, iptr) + direction;
+//     while (i >= 0 and i < code.len) : (i += direction) {
+//         const i_inst = code[@intCast(usize, i)];
+//         if (@enumToInt(i_inst) == @enumToInt(opposite)) {
+//             if (depth == 0) return @intCast(usize, i);
+//             depth -= 1;
+//         } else if (@enumToInt(i_inst) == @enumToInt(start)) {
+//             depth += 1;
+//         }
+//     }
+//     return FindErr.Unmatched;
+// }
 
 // -------------------- tests --------------------
 
