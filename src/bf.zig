@@ -2,15 +2,20 @@ const std = @import("std");
 
 // -------------------- parse --------------------
 
-const Inst = union (enum) {
-    Plus: usize, // count
-    Minus: usize, // count
-    Left: usize, // count
-    Right: usize, // count
-    LBracket: ?usize, // end index. null until we set it later. SHOULD NOT BE NULL IN DATA RETURNED FROM PARSE!
-    RBracket: usize, // start index
-    Write: usize, // count
+const InstKind = enum {
+    Plus,
+    Minus,
+    Left,
+    Right,
+    LBracket, // end index. null until we set it later. SHOULD NOT BE NULL IN DATA RETURNED FROM PARSE!
+    RBracket, // start index
+    Write, // count
     Read,
+};
+
+const Inst = struct {
+    kind: InstKind,
+    data: ?usize, // usage depends on kind
 };
 
 pub fn parse(code: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Inst) {
@@ -31,45 +36,45 @@ pub fn parse(code: []const u8, alloc: std.mem.Allocator) !std.ArrayList(Inst) {
             '+' => {
                 const count = get_count(code, i);
                 i += count;
-                try ret.append(Inst{.Plus = count});
+                try ret.append(Inst{.kind = .Plus, .data = count});
             },
             '-' => {
                 const count = get_count(code, i);
                 i += count;
-                try ret.append(Inst{.Minus = count});
+                try ret.append(Inst{.kind = .Minus, .data = count});
             },
             '<' => {
                 const count = get_count(code, i);
                 i += count;
-                try ret.append(Inst{.Left = count});
+                try ret.append(Inst{.kind = .Left, .data = count});
             },
             '>' => {
                 const count = get_count(code, i);
                 i += count;
-                try ret.append(Inst{.Right = count});
+                try ret.append(Inst{.kind = .Right, .data = count});
             },
             '[' => {
                 try bracket_stack.append(ret.items.len);
-                try ret.append(Inst{.LBracket = null});
+                try ret.append(Inst{.kind = .LBracket, .data = null});
                 i += 1;
             },
             ']' => {
                 const open_idx = bracket_stack.popOrNull() orelse return FindErr.Unmatched;
                 const close_idx = ret.items.len;
-                try ret.append(Inst{.RBracket = open_idx});
+                try ret.append(Inst{.kind = .RBracket, .data = open_idx});
                 // go back and set the open bracket to point to the new close bracket
                 // it is easier to just overwrite it than mutate the existing value
-                ret.items[open_idx] = Inst{.LBracket = close_idx};
+                ret.items[open_idx] = Inst{.kind = .LBracket, .data = close_idx};
                 i += 1;
             },
             ',' => {
-                try ret.append(Inst.Read);
+                try ret.append(Inst{.kind = .Read, .data = null});
                 i += 1;
             },
             '.' => {
                 const count = get_count(code, i);
                 i += count;
-                try ret.append(Inst{.Write = count});
+                try ret.append(Inst{.kind = .Write, .data = count});
             },
             else => {i += 1;}, // ignore all other characters
         }
@@ -95,23 +100,24 @@ pub fn interpret(code: []const Inst, in: File, out: File) !void {
     var iptr: usize = 0;
     const inr = in.reader();
     while (iptr < code.len) : (iptr += 1) {
-        switch (code[iptr]) {
-            .Plus => |n| {
-                tape[ptr] +%= @intCast(u8, n);
+        const this_inst = code[iptr];
+        switch (this_inst.kind) {
+            .Plus => {
+                tape[ptr] +%= @intCast(u8, this_inst.data.?);
             },
-            .Minus => |n| {
-                tape[ptr] -%= @intCast(u8, n);
+            .Minus => {
+                tape[ptr] -%= @intCast(u8, this_inst.data.?);
             },
-            .Left => |n| {
-                ptr -= n;
+            .Left => {
+                ptr -= this_inst.data.?;
             },
-            .Right => |n| {
-                ptr += n;
+            .Right => {
+                ptr += this_inst.data.?;
             },
-            .Write => |n| {
+            .Write => {
                 const char = tape[ptr];
                 var i: usize = 0;
-                while (i < n) : (i += 1) {
+                while (i < this_inst.data.?) : (i += 1) {
                     const i_s: *const [1]u8 = &char;
                     _ = try out.write(i_s);
                 }
@@ -119,11 +125,11 @@ pub fn interpret(code: []const Inst, in: File, out: File) !void {
             .Read => {
                 tape[ptr] = try inr.readByte();
             },
-            .LBracket => |end| {
-                if (tape[ptr] == 0) iptr = end.?;
+            .LBracket => {
+                if (tape[ptr] == 0) iptr = this_inst.data.?;
             },
-            .RBracket => |start| {
-                if (tape[ptr] != 0) iptr = start;
+            .RBracket => {
+                if (tape[ptr] != 0) iptr = this_inst.data.?;
             }
         }
         // std.debug.print("======\ntape {*}\nptr {} iptr {}\ninst {}\n", .{tape[0..20], ptr, iptr, code[iptr]});
