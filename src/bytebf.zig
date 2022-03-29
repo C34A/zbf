@@ -43,7 +43,7 @@ pub fn to_bytecode(program: []const bf.Inst, alloc: std.mem.Allocator) !std.Arra
                 try ret.append(low);
             },
             .Right => |n| {
-                try ret.append(@enumToInt(BInst.Left));
+                try ret.append(@enumToInt(BInst.Right));
                 const val = @intCast(u16, n);
                 const low = @intCast(u8, val & 0xFF);
                 const high = @intCast(u8, (val >> 8) & 0xFF);
@@ -125,6 +125,7 @@ pub fn interpret_bytecode(code: []const u8, in: File, out: File) !void {
                 const low = code[iptr + 2];
                 const val: u16 = (@intCast(u16, high) << 8) | low;
                 // move ptr left by subtracting
+                std.debug.print("subbing {x} (ptr {} iptr {})\n", .{val, ptr, iptr});
                 ptr -= val;
                 iptr += 3; // skip over both value bytes.
             },
@@ -178,7 +179,7 @@ pub fn interpret_bytecode(code: []const u8, in: File, out: File) !void {
                     const low = code[iptr + 2];
                     const opposite: u16 = (@intCast(u16, high) << 8) | low;
                     // jump!
-                    iptr = opposite + 1;
+                    iptr = opposite + 3;
                 } else iptr += 3; // skip over both value bytes.
             },
             @enumToInt(BInst.RBracket) => {
@@ -187,8 +188,97 @@ pub fn interpret_bytecode(code: []const u8, in: File, out: File) !void {
                     const high = code[iptr + 1];
                     const low = code[iptr + 2];
                     const opposite: u16 = (@intCast(u16, high) << 8) | low;
-                    iptr = opposite + 1;
+                    iptr = opposite + 3;
                 } else iptr += 3; // skip over both value bytes.
+            },
+            else => {
+                //invalid instruction!
+                std.log.err("Invalid instruction at iptr {}! next 5: {} {} {} {} {}",
+                    .{
+                        iptr,
+                        code[iptr],
+                        code[iptr + 1],
+                        code[iptr + 2],
+                        code[iptr + 3],
+                        code[iptr + 4],
+                    }
+                );
+                return InterpErr.InvalidInstruction;
+            }
+        }
+    }
+}
+
+pub fn disassemble_bytecode(code: []const u8) InterpErr!void {
+    var iptr: usize = 0;
+    while (iptr < code.len) {
+        switch (code[iptr]) {
+            @enumToInt(BInst.Plus) => {
+                const val = code[iptr + 1];
+                std.debug.print("{:0>6} Plus {}\n", .{iptr, val});
+                iptr += 2; // skip over val byte
+            },
+            @enumToInt(BInst.Minus) => {
+                // same as plus but subtract.
+                const val = code[iptr + 1];
+                std.debug.print("{:0>6} Minus {}\n", .{iptr, val});
+                iptr += 2;
+            },
+            @enumToInt(BInst.Left) => {
+                // reassemble u16
+                const high = code[iptr + 1];
+                const low = code[iptr + 2];
+                const val: u16 = (@intCast(u16, high) << 8) | low;
+                std.debug.print("{:0>6} Left {x} {x} ({})\n", .{iptr, high, low, val});
+                iptr += 3; // skip over both value bytes.
+            },
+            @enumToInt(BInst.Right) => {
+                // same as left but add instead of subtracting
+                const high = code[iptr + 1];
+                const low = code[iptr + 2];
+                const val: u16 = (@intCast(u16, high) << 8) | low;
+                std.debug.print("{:0>6} Left {x} {x} ({})\n", .{iptr, high, low, val});
+                iptr += 3; // skip over both value bytes.
+            },
+            @enumToInt(BInst.WriteOne) => {
+                // this is basically the same as in the other interpreter.
+                std.debug.print("{:0>6} WriteOne\n", .{iptr});
+                iptr += 1; // no value to skip over, just the instruction.
+            },
+            @enumToInt(BInst.WriteRep) => {
+                // reassemble u32
+                const high = code[iptr + 1];
+                const b2   = code[iptr + 2];
+                const b1   = code[iptr + 3];
+                const low  = code[iptr + 4];
+                const n = (
+                    (@intCast(u32, high) << 24) |
+                    (@intCast(u32, b2) << 16) |
+                    (@intCast(u32, b1) << 8) |
+                    low
+                );
+                
+                std.debug.print("{:0>6} WriteRep {x} {x} {x} {x} ({})\n", .{iptr, high, b2, b1, low, n});
+
+                iptr += 5;
+            },
+            @enumToInt(BInst.Read) => {
+                std.debug.print("{:0>6} Read\n", .{iptr});
+                iptr += 1;
+            },
+            @enumToInt(BInst.LBracket) => {
+                    const high = code[iptr + 1];
+                    const low = code[iptr + 2];
+                    const opposite: u16 = (@intCast(u16, high) << 8) | low;
+                    std.debug.print("{:0>6} LBracket {} {} ({})\n", .{iptr, high, low, opposite});
+                    iptr += 3; // skip over both value bytes.
+            },
+            @enumToInt(BInst.RBracket) => {
+                    const high = code[iptr + 1];
+                    const low = code[iptr + 2];
+                    const opposite: u16 = (@intCast(u16, high) << 8) | low;
+                    std.debug.print("{:0>6} RBracket {} {} ({})\n", .{iptr, high, low, opposite});
+                    iptr += 3; // skip over both value bytes.
             },
             else => {
                 //invalid instruction!

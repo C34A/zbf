@@ -46,7 +46,7 @@ pub fn main() anyerror!void {
     // try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
     const bytecode = try bytebf.to_bytecode(instructions.items, alloc);
     defer bytecode.deinit();
-
+    try bytebf.disassemble_bytecode(bytecode.items);
     try bytebf.interpret_bytecode(bytecode.items, std.io.getStdIn(), std.io.getStdOut());
 }
 
