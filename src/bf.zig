@@ -2,7 +2,7 @@ const std = @import("std");
 
 // -------------------- parse --------------------
 
-const Inst = union (enum) {
+pub const Inst = union (enum) {
     Plus: usize, // count
     Minus: usize, // count
     Left: usize, // count
@@ -86,7 +86,7 @@ fn get_count(code: []const u8, start: usize) usize {
 
 // -------------------- exec --------------------
 
-const tape_len = 30_000;
+pub const tape_len = 30_000;
 const File = std.fs.File;
 
 pub fn interpret(code: []const Inst, in: File, out: File) !void {
@@ -130,7 +130,7 @@ pub fn interpret(code: []const Inst, in: File, out: File) !void {
     }
 }
 
-const FindErr = error {
+pub const FindErr = error {
     IllegalStart, // didn't start on bracket
     Unmatched,    // didn't find a match
 };

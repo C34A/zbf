@@ -1,5 +1,6 @@
 const std = @import("std");
 const bf = @import("./bf.zig");
+const bytebf = @import("./bytebf.zig");
 
 const alloc = std.heap.page_allocator;
 
@@ -41,7 +42,12 @@ pub fn main() anyerror!void {
     // _ = try stdout.write(bytes);
 
     const instructions = try bf.parse(bytes, alloc);
-    try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
+    defer instructions.deinit();
+    // try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
+    const bytecode = try bytebf.to_bytecode(instructions.items, alloc);
+    defer bytecode.deinit();
+
+    try bytebf.interpret_bytecode(bytecode.items, std.io.getStdIn(), std.io.getStdOut());
 }
 
 test "basic test" {
