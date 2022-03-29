@@ -43,11 +43,14 @@ pub fn main() anyerror!void {
 
     const instructions = try bf.parse(bytes, alloc);
     defer instructions.deinit();
-    // try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
     const bytecode = try bytebf.to_bytecode(instructions.items, alloc);
     defer bytecode.deinit();
-    try bytebf.disassemble_bytecode(bytecode.items);
-    try bytebf.interpret_bytecode(bytecode.items, std.io.getStdIn(), std.io.getStdOut());
+    // try bytebf.disassemble_bytecode(bytecode.items);
+    std.debug.print("size of instructions: {}\n", .{instructions.items.len * @sizeOf(bf.Inst)});
+    std.debug.print("size of bytecode: {}\n", .{bytecode.items.len});
+
+    try bf.interpret(instructions.items, std.io.getStdIn(), std.io.getStdOut());
+    // try bytebf.interpret_bytecode(bytecode.items, std.io.getStdIn(), std.io.getStdOut());
 }
 
 test "basic test" {

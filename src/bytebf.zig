@@ -19,7 +19,11 @@ const BInst = enum (u8) {
 
 pub fn to_bytecode(program: []const bf.Inst, alloc: std.mem.Allocator) !std.ArrayList(u8) {
     var ret = std.ArrayList(u8).init(alloc);
-    errdefer ret.deinit();
+    errdefer ret.deinit(); // if we exit with an error, make sure ret is freed.
+    // Instead of using the indices from the Inst compiled program, we will
+    // just recreate them using the same stack strategy.
+    var bracket_stack = std.ArrayList(usize).init(alloc);
+    defer bracket_stack.deinit();
     for (program) |inst| {
         switch (inst) {
             .Plus => |n| {
@@ -70,21 +74,35 @@ pub fn to_bytecode(program: []const bf.Inst, alloc: std.mem.Allocator) !std.Arra
                     try ret.append(low);
                 }
             },
-            .LBracket => |end| {
+            .LBracket => {
+                // push the address of this instruction onto the stack so we can
+                // backpatch it later.
+                try bracket_stack.append(ret.items.len);
                 try ret.append(@enumToInt(BInst.LBracket));
-                const val = @intCast(u16, end orelse return bf.FindErr.Unmatched);
-                const low = @intCast(u8, val & 0xFF);
-                const high = @intCast(u8, (val >> 8) & 0xFF);
-                try ret.append(high);
-                try ret.append(low);
+                // push a temporary address. This is probably guaranteed to be
+                // out of bounds so it should be obvious if it shows up later.
+                try ret.append(0xFF);
+                try ret.append(0xFF);
             },
-            .RBracket => |start| {
+            .RBracket => {
+                const open_idx = bracket_stack.popOrNull() orelse return bf.FindErr.Unmatched;
+                const close_idx = ret.items.len;
+
+                // push this instruction with the address of the start
                 try ret.append(@enumToInt(BInst.RBracket));
-                const val = @intCast(u16, start);
+                const val = @intCast(u16, open_idx);
                 const low = @intCast(u8, val & 0xFF);
                 const high = @intCast(u8, (val >> 8) & 0xFF);
                 try ret.append(high);
                 try ret.append(low);
+
+                // backpatch the start
+
+                const end = @intCast(u16, close_idx);
+                const end_low = @intCast(u8, end & 0xFF);
+                const end_high = @intCast(u8, (end >> 8) & 0xFF);
+                ret.items[open_idx + 1] = end_high;
+                ret.items[open_idx + 2] = end_low;
             }
         }
     }
@@ -125,7 +143,6 @@ pub fn interpret_bytecode(code: []const u8, in: File, out: File) !void {
                 const low = code[iptr + 2];
                 const val: u16 = (@intCast(u16, high) << 8) | low;
                 // move ptr left by subtracting
-                std.debug.print("subbing {x} (ptr {} iptr {})\n", .{val, ptr, iptr});
                 ptr -= val;
                 iptr += 3; // skip over both value bytes.
             },
